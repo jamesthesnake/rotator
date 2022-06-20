@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <optional>
 
 using namespace std::string_literals;
 
@@ -25,7 +26,7 @@ constexpr const auto ShapeSegments = 4;
 constexpr const auto Columns = 3;
 constexpr const auto TopMargin = 40;
 
-static const auto BackgroundColor = glm::vec3(0.75);
+constexpr const auto BackgroundColor = glm::vec3(0.75);
 
 constexpr const auto TotalPlayTime = 120.0f;
 
@@ -33,84 +34,114 @@ constexpr const auto FadeOutTime = 2.0f;
 constexpr const auto SuccessStateTime = 2.0f;
 constexpr const auto FailStateTime = 1.0f;
 
+constexpr const std::array<glm::imat4x4, 24> Rotations = {
+    glm::imat4x4{{0, 0, -1, 0}, {0, -1, 0, 0}, {-1, 0, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, 0, -1, 0}, {0, 1, 0, 0}, {1, 0, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, 0, 1, 0}, {0, -1, 0, 0}, {1, 0, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, 0, 1, 0}, {0, 1, 0, 0}, {-1, 0, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, 0, -1, 0}, {-1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, 0, -1, 0}, {1, 0, 0, 0}, {0, -1, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, 0, 1, 0}, {-1, 0, 0, 0}, {0, -1, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, 0, 1, 0}, {1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, -1, 0, 0}, {0, 0, -1, 0}, {1, 0, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, -1, 0, 0}, {0, 0, 1, 0}, {-1, 0, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, 1, 0, 0}, {0, 0, -1, 0}, {-1, 0, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, 1, 0, 0}, {0, 0, 1, 0}, {1, 0, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, -1, 0, 0}, {-1, 0, 0, 0}, {0, 0, -1, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, -1, 0, 0}, {1, 0, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, 1, 0, 0}, {-1, 0, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{0, 1, 0, 0}, {1, 0, 0, 0}, {0, 0, -1, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{-1, 0, 0, 0}, {0, 0, -1, 0}, {0, -1, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{-1, 0, 0, 0}, {0, 0, 1, 0}, {0, 1, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{1, 0, 0, 0}, {0, 0, -1, 0}, {0, 1, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{1, 0, 0, 0}, {0, 0, 1, 0}, {0, -1, 0, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{-1, 0, 0, 0}, {0, -1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{-1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, -1, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{1, 0, 0, 0}, {0, -1, 0, 0}, {0, 0, -1, 0}, {0, 0, 0, 1}},
+    glm::imat4x4{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}}};
+
 constexpr const char *FontName = "OpenSans_Regular.ttf";
 
-std::optional<std::vector<glm::vec3>> generateBlocks(size_t dna)
+Blocks rotated(const Blocks &shape, const glm::imat4x4 &rotation)
 {
-    auto center = glm::vec3(0);
-    unsigned direction = 2;
-    float side = 1;
+    Blocks rotated(shape.size());
+    std::transform(shape.begin(), shape.end(), rotated.begin(),
+                   [&rotation](const glm::ivec3 &p) { return rotation * glm::ivec4(p, 1); });
+    return rotated;
+}
 
-    std::vector<glm::vec3> blocks;
+Blocks canonicalized(const Blocks &shape)
+{
+    const auto origin = std::accumulate(shape.begin(), shape.end(), glm::ivec3(std::numeric_limits<int>::max()),
+                                        [](const glm::ivec3 &a, const glm::ivec3 &b) { return glm::min(a, b); });
+    Blocks result(shape.size());
+    std::transform(shape.begin(), shape.end(), result.begin(), [&origin](const glm::ivec3 &p) { return p - origin; });
+    std::sort(result.begin(), result.end(), [](const glm::ivec3 &lhs, const glm::ivec3 &rhs) {
+        return std::tie(lhs.x, lhs.y, lhs.z) < std::tie(rhs.x, rhs.y, rhs.z);
+    });
+    return result;
+}
+
+bool sameShape(const Blocks &lhs, const Blocks &rhs)
+{
+    if (lhs.size() != rhs.size())
+        return false;
+    const Blocks base = canonicalized(lhs);
+    for (const auto &rotation : Rotations)
+    {
+        if (base == canonicalized(rotated(rhs, rotation)))
+            return true;
+    }
+    return false;
+}
+
+std::optional<Blocks> generateShape(std::mt19937 &generator)
+{
+    auto randomBit = [&generator] { return std::uniform_int_distribution<int>(0, 1)(generator); };
+
+    auto center = glm::ivec3(0);
+    unsigned direction = 2;
+    int side = 1;
+
+    Blocks blocks;
     for (size_t i = 0; i < ShapeSegments; ++i)
     {
-        auto base = dna >> (i * 3);
-        const auto d = 2.0f * side * glm::vec3(direction >> 2, (direction >> 1) & 1, direction & 1);
-        const auto l = 2 + (i & 1) + (base & 1);
+        const auto d = 2 * side * glm::ivec3(direction >> 2, (direction >> 1) & 1, direction & 1);
+        const auto l = 2 + (i & 1) + randomBit();
         for (int i = 0; i < l; ++i)
         {
             // reject self-intersecting shapes
-            auto it = std::find(blocks.begin(), blocks.end(), center);
-            if (it != blocks.end())
+            if (auto it = std::find(blocks.begin(), blocks.end(), center); it != blocks.end())
                 return {};
             blocks.push_back(center);
             center += d;
         }
-
-        // 001 -> 010 100
-        // 010 -> 001 100
-        // 100 -> 001 010
-
         switch (direction)
         {
         case 1:
-            direction = (base & 2) ? 2 : 4;
+            // 001 -> 010 100
+            direction = randomBit() ? 2 : 4;
             break;
         case 2:
-            direction = (base & 2) ? 1 : 4;
+            // 010 -> 001 100
+            direction = randomBit() ? 1 : 4;
             break;
         case 4:
-            direction = (base & 2) ? 1 : 2;
+            // 100 -> 001 010
+            direction = randomBit() ? 1 : 2;
             break;
         default:
             assert(false);
             break;
         }
-        if (base & 4)
+        if (randomBit())
             side = -side;
     }
-
     return blocks;
 }
 
-std::vector<float> shapeId(const std::vector<glm::vec3> &blocks)
+std::unique_ptr<Shape> initializeShape(const Blocks &blocks, const glm::imat4x4 &baseRotation)
 {
-    auto center = std::accumulate(blocks.begin(), blocks.end(), glm::vec3(0));
-    center *= 1.0f / blocks.size();
-    std::vector<float> id;
-    std::transform(blocks.begin(), blocks.end(), std::back_inserter(id),
-                   [&center](const glm::vec3 &block) { return glm::abs(glm::distance(center, block)); });
-    std::sort(id.begin(), id.end());
-    return id;
-}
-
-bool sameIds(const std::vector<float> &lhs, const std::vector<float> &rhs)
-{
-    if (lhs.size() != rhs.size())
-        return false;
-    for (size_t i = 0, size = lhs.size(); i < size; ++i)
-    {
-        constexpr auto Epsilon = 1e-4;
-        if (std::abs(lhs[i] - rhs[i]) > Epsilon)
-            return false;
-    }
-    return true;
-}
-
-std::unique_ptr<Shape> initializeShape(const std::vector<glm::vec3> &blocks)
-{
-    static std::default_random_engine generator;
-
     auto makeMesh = [&blocks](float blockScale) {
         struct Vertex
         {
@@ -120,8 +151,8 @@ std::unique_ptr<Shape> initializeShape(const std::vector<glm::vec3> &blocks)
         std::vector<Vertex> vertices;
         for (const auto &center : blocks)
         {
-            auto addFace = [&vertices, &center, blockScale](const glm::vec3 &p0, const glm::vec3 &p1,
-                                                            const glm::vec3 &p2, const glm::vec3 &p3) {
+            auto addFace = [&vertices, blockScale, center = glm::vec3(center)](
+                               const glm::vec3 &p0, const glm::vec3 &p1, const glm::vec3 &p2, const glm::vec3 &p3) {
                 vertices.push_back({p0 * blockScale + center, {0, 0}});
                 vertices.push_back({p1 * blockScale + center, {0, 1}});
                 vertices.push_back({p2 * blockScale + center, {1, 1}});
@@ -161,32 +192,19 @@ std::unique_ptr<Shape> initializeShape(const std::vector<glm::vec3> &blocks)
         return mesh;
     };
 
-    auto center = std::accumulate(blocks.begin(), blocks.end(), glm::vec3(0));
+    glm::vec3 center = std::accumulate(blocks.begin(), blocks.end(), glm::ivec3(0));
     center *= 1.0f / blocks.size();
 
-    const auto rotation = [] {
-        std::uniform_int_distribution<int> zero_or_one(0, 1);
-
-        static const std::initializer_list<glm::vec3> dirs = {{0, 0, 1}, {0, 1, 0}, {1, 0, 0}};
-        auto r = glm::mat4(1.0f);
-        for (glm::vec3 dir : dirs)
-        {
-            auto angle = 0.25f * glm::pi<float>();
-            if (zero_or_one(generator))
-                angle = -angle;
-            if (zero_or_one(generator))
-                dir = -dir;
-            r = glm::rotate(r, angle, dir);
-        }
-        return glm::quat_cast(r);
-    }();
+    const auto rx = glm::rotate(glm::mat4(1), 0.25f * glm::pi<float>(), glm::vec3(1, 0, 0));
+    const auto rz = glm::rotate(glm::mat4(1), 0.25f * glm::pi<float>(), glm::vec3(0, 0, 1));
+    const auto rotation = glm::quat_cast(rx * rz * glm::mat4(baseRotation));
 
     auto shape = std::make_unique<Shape>();
     shape->blocks = blocks;
-    shape->id = shapeId(blocks);
     shape->center = center;
     shape->mesh = makeMesh(1.0f);
     shape->outlineMesh = makeMesh(1.25f);
+    shape->baseRotation = baseRotation;
     shape->rotation = rotation;
 
     return shape;
@@ -291,9 +309,7 @@ void Demo::renderShapes() const
                 }
             }();
             if (m_state == State::Result)
-            {
                 color = glm::mix(color, BackgroundColor, std::min(1.0f, m_stateTime / FadeOutTime));
-                }
             m_shaderManager->setUniform(ShaderManager::MixColor, glm::vec4(color, 1));
             glDisable(GL_DEPTH_TEST);
             shape->outlineMesh->render(GL_TRIANGLES);
@@ -424,29 +440,6 @@ void Demo::renderScore() const
     static const UIPainter::Font FontBig{FontName, 60};
     static const UIPainter::Font FontSmall{FontName, 40};
 
-    const auto scoreText = [this] {
-        std::stringstream ss;
-        ss << m_score << " SHAPES ROTATED";
-        return ss.str();
-    }();
-
-    const auto averageText = [this] {
-        std::stringstream ss;
-        if (m_score == 0)
-        {
-            ss << "NaN"s;
-        }
-        else
-        {
-            const auto secs = TotalPlayTime / m_score;
-            ss << std::fixed;
-            ss << std::setprecision(2);
-            ss << secs;
-        }
-        ss << " SECONDS/SHAPE";
-        return ss.str();
-    }();
-
     const auto alpha = [this] {
         constexpr auto StartTime = 2.0f;
         constexpr auto FadeInTime = 1.0f;
@@ -457,8 +450,27 @@ void Demo::renderScore() const
     const auto color = glm::vec4(0, 0, 0, alpha);
 
     m_uiPainter->setFont(FontBig);
+
+    const auto scoreText = [this] {
+        std::stringstream ss;
+        ss << m_score << " SHAPES ROTATED";
+        return ss.str();
+    }();
     drawCenteredText(glm::vec2(0, -40), color, scoreText);
-    drawCenteredText(glm::vec2(0, 20), color, averageText);
+
+    if (m_score > 0)
+    {
+        const auto accuracyText = [this] {
+            std::stringstream ss;
+            ss << "ACCURACY: ";
+            ss << std::fixed;
+            ss << std::setprecision(2);
+            ss << m_score * 100.0f / m_attempts;
+            ss << "%";
+            return ss.str();
+        }();
+        drawCenteredText(glm::vec2(0, 20), color, accuracyText);
+    }
 
     m_uiPainter->setFont(FontSmall);
     drawCenteredText(glm::vec2(0, 200), color, "TAP TO RETRY"s);
@@ -508,35 +520,36 @@ void Demo::update(float elapsed)
 void Demo::initialize()
 {
     m_score = 0;
+    m_attempts = 0;
     m_playTime = 0.0f;
     initializeShapes();
 }
 
 void Demo::initializeShapes()
 {
-    std::random_device rd;
-    std::mt19937 generator(rd());
-
+    static auto generator = [] {
+        std::random_device rd;
+        return std::mt19937(rd());
+    }();
     m_firstShape = std::uniform_int_distribution<int>(0, ShapeCount - 2)(generator);
     m_secondShape = std::uniform_int_distribution<int>(m_firstShape + 1, ShapeCount - 1)(generator);
 
     m_shapes.clear();
-    for (int i = 0; i < ShapeCount; ++i) {
-        auto blocks = [this, i, &generator] {
+    for (int i = 0; i < ShapeCount; ++i)
+    {
+        auto blocks = [this, i] {
             if (i == m_secondShape)
                 return m_shapes[m_firstShape]->blocks;
-
             std::uniform_int_distribution<size_t> distribution(0, (1 << (3 * ShapeSegments)) - 1);
-            std::optional<std::vector<glm::vec3>> blocks;
+            std::optional<Blocks> blocks;
             for (;;)
             {
-                blocks = generateBlocks(distribution(generator));
+                blocks = generateShape(generator);
                 const auto valid = [this, i, &blocks] {
                     if (!blocks)
                         return false;
-                    const auto id = shapeId(*blocks);
                     auto it = std::find_if(m_shapes.begin(), m_shapes.end(),
-                                           [&id](const auto &shape) { return sameIds(id, shape->id); });
+                                           [&blocks](const auto &shape) { return sameShape(*blocks, shape->blocks); });
                     return it == m_shapes.end();
                 }();
                 if (valid)
@@ -544,10 +557,28 @@ void Demo::initializeShapes()
             }
             return *blocks;
         }();
-        m_shapes.push_back(initializeShape(blocks));
+        auto rotation = [this, i, &blocks] {
+            glm::imat4x4 rotation;
+            for (;;)
+            {
+                const auto index = std::uniform_int_distribution<int>(0, Rotations.size() - 1)(generator);
+                rotation = Rotations[index];
+                const auto valid = [this, i, &blocks, &rotation] {
+                    if (i != m_secondShape)
+                        return true;
+                    const auto &firstShape = m_shapes[m_firstShape];
+                    const Blocks base = canonicalized(rotated(firstShape->blocks, firstShape->baseRotation));
+                    return base != canonicalized(rotated(blocks, rotation));
+                }();
+                if (valid)
+                    break;
+            }
+            return rotation;
+        }();
+        m_shapes.push_back(initializeShape(blocks, rotation));
     }
 
-    assert(sameIds(m_shapes[m_firstShape]->id, m_shapes[m_secondShape]->id));
+    assert(sameShape(m_shapes[m_firstShape]->blocks, m_shapes[m_secondShape]->blocks));
 
     m_selectedCount = 0;
 }
@@ -630,21 +661,19 @@ void Demo::toggleShapeSelection(int index)
     }
     else
     {
-        if (m_selectedCount < 2)
+        shape->selected = true;
+        ++m_selectedCount;
+        if (m_selectedCount == 2)
         {
-            shape->selected = true;
-            ++m_selectedCount;
-            if (m_selectedCount == 2)
+            ++m_attempts;
+            if (m_shapes[m_firstShape]->selected && m_shapes[m_secondShape]->selected)
             {
-                if (m_shapes[m_firstShape]->selected && m_shapes[m_secondShape]->selected)
-                {
-                    ++m_score;
-                    setState(State::Success);
-                }
-                else
-                {
-                    setState(State::Fail);
-                }
+                ++m_score;
+                setState(State::Success);
+            }
+            else
+            {
+                setState(State::Fail);
             }
         }
     }
